@@ -1,0 +1,135 @@
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Stage, Layer, Line, Circle } from "react-konva";
+import { Button } from "@/components/ui/button";
+
+export default function DrawCanvas() {
+  const [lines, setLines] = useState([]);
+  const [currentLine, setCurrentLine] = useState([]);
+  const [mode, setMode] = useState("draw"); // "draw" or "shape"
+  const [background, setBackground] = useState("");
+  const [tasks, setTasks] = useState([]);
+  const [newTask, setNewTask] = useState("");
+  const isDrawing = useRef(false);
+
+  const handleMouseDown = useCallback((e) => {
+    isDrawing.current = true;
+    const pos = e.target.getStage().getPointerPosition();
+    setCurrentLine([pos]);
+  }, []);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isDrawing.current) return;
+    const stage = e.target.getStage();
+    const point = stage.getPointerPosition();
+    setCurrentLine((prev) => [...prev, point]);
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    if (!isDrawing.current) return;
+    isDrawing.current = false;
+    setLines((prevLines) => {
+      if (mode === "draw") {
+        return [...prevLines, { points: currentLine, type: "line" }];
+      } else if (mode === "shape" && currentLine.length > 2) {
+        const first = currentLine[0];
+        const last = currentLine[currentLine.length - 1];
+        const dx = last.x - first.x;
+        const dy = last.y - first.y;
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+          return [...prevLines, { x: first.x, y: first.y, type: "circle" }];
+        } else {
+          return [...prevLines, { points: [first, last], type: "line" }];
+        }
+      }
+      return prevLines;
+    });
+    setCurrentLine([]);
+  }, [currentLine, mode]);
+
+  const handleBackgroundChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setBackground(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const addTask = () => {
+    if (newTask.trim()) {
+      setTasks([...tasks, { text: newTask, completed: false }]);
+      setNewTask("");
+    }
+  };
+
+  const toggleTask = (index) => {
+    setTasks(tasks.map((task, i) => (i === index ? { ...task, completed: !task.completed } : task)));
+  };
+
+  return (
+    <div style={{ display: "flex", height: "100vh", backgroundImage: `url(${background})`, backgroundSize: "cover" }}>
+      {/* Đồng hồ */}
+      <div style={{ width: "150px", padding: "10px", textAlign: "center" }}>
+        <Clock />
+        <input type="file" onChange={handleBackgroundChange} accept="image/*" />
+      </div>
+      
+      {/* Canvas */}
+      <div style={{ flexGrow: 1 }}>
+        <Button onClick={() => setMode(mode === "draw" ? "shape" : "draw")}>
+          Mode: {mode}
+        </Button>
+        <Stage
+          width={800}
+          height={600}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          style={{ border: "1px solid black" }}
+        >
+          <Layer>
+            {lines.map((line, i) =>
+              line.type === "line" ? (
+                <Line key={i} points={line.points.flat()} stroke="black" strokeWidth={2} />
+              ) : (
+                <Circle key={i} x={line.x} y={line.y} radius={20} stroke="black" />
+              )
+            )}
+            <Line points={currentLine.flat()} stroke="gray" strokeWidth={2} />
+          </Layer>
+        </Stage>
+      </div>
+      
+      {/* Danh sách công việc */}
+      <div style={{ width: "200px", padding: "10px" }}>
+        <h3>Tasks</h3>
+        <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="New task" />
+        <Button onClick={addTask}>Add</Button>
+        <ul>
+          {tasks.map((task, index) => (
+            <li key={index} onClick={() => toggleTask(index)} style={{ textDecoration: task.completed ? "line-through" : "none", cursor: "pointer" }}>
+              {task.text}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function Clock() {
+  const [time, setTime] = useState(new Date().toLocaleTimeString());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTime(new Date().toLocaleTimeString());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return <h2>{time}</h2>;
+}
+
+              
