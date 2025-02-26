@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Physics Hub</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            text-align: center;
+        }
+        .navbar {
+            background: #333;
+            color: white;
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .menu {
+            display: flex;
+            gap: 15px;
+        }
+        .menu a, .auth a {
+            color: white;
+            text-decoration: none;
+            padding: 5px 10px;
+        }
+        .menu a:hover, .auth a:hover {
+            background: #555;
+        }
+        .content {
+            display: none;
+            padding: 20px;
+        }
+        .active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="menu">
+            <a href="#" onclick="showContent('electrical')">Electrical</a>
+            <a href="#" onclick="showContent('thermal')">Thermal</a>
+            <a href="#" onclick="showContent('mechanic')">Mechanic</a>
+            <a href="#" onclick="showContent('optics')">Optics</a>
+            <a href="#" onclick="showContent('qft')">QFT</a>
+            <a href="#" onclick="showContent('support')">Support</a>
+        </div>
+        <div class="auth">
+            <a href="#">Login</a>
+            <a href="#">Register</a>
+        </div>
+    </div>
+    
+    <div id="electrical" class="content active">Electrical Content</div>
+    <div id="thermal" class="content">Thermal Content</div>
+    <div id="mechanic" class="content">Mechanic Content</div>
+    <div id="optics" class="content">Optics Content</div>
+    <div id="qft" class="content">QFT Content</div>
+    <div id="support" class="content">Support Content</div>
+    
+    <script>
+        function showContent(section) {
+            document.querySelectorAll('.content').forEach(div => div.classList.remove('active'));
+            document.getElementById(section).classList.add('active');
+        }
+    </script>
+</body>
+</html>
