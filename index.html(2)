@@ -1,0 +1,463 @@
+import jwt
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+import os
+import re
+import uuid
+import datetime
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SECRET_KEY'] = 'supersecretkey'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB limit
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'docx', 'txt'}
+
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+
+class Task(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=str(uuid.uuid4()))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    task = db.Column(db.String(500), nullable=False)
+    completed = db.Column(db.Boolean, default=False)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def generate_token(username):
+    payload = {'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)}
+    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+def validate_username(username):
+    return re.match(r'^[a-zA-Z0-9_]+$', username) is not None
+
+def get_user_from_token(token):
+    try:
+        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return User.query.filter_by(username=decoded['username']).first()
+    except:
+        return None
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not username or not password:
+        return jsonify({'error': 'Thiếu username hoặc password'}), 400
+    if not validate_username(username):
+        return jsonify({'error': 'Username chỉ được chứa chữ, số và _'}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username đã tồn tại'}), 400
+    if len(password) < 6 or not re.search(r"[A-Za-z0-9@#$%^&+=]", password):
+        return jsonify({'error': 'Mật khẩu quá yếu'}), 400
+    
+    hashed_pw = generate_password_hash(password)
+    new_user = User(username=username, password=hashed_pw)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'Đăng ký thành công'}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    user = User.query.filter_by(username=username).first()
+    
+    if user and check_password_hash(user.password, password):
+        token = generate_token(username)
+        return jsonify({'message': 'Đăng nhập thành công', 'token': token})
+    return jsonify({'error': 'Sai username hoặc password'}), 401
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Không có file được gửi'}), 400
+    
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Tên file không hợp lệ hoặc định dạng không được phép'}), 400
+    if len(file.filename) > 100:
+        return jsonify({'error': 'Tên file quá dài'}), 400
+    
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    return jsonify({'message': 'Tải lên thành công', 'filename': filename}), 200
+
+@app.route('/todo', methods=['GET', 'POST', 'DELETE', 'PUT'])
+def todo():
+    token = request.headers.get('Authorization')
+    user = get_user_from_token(token)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    if request.method == 'GET':
+        tasks = Task.query.filter_by(user_id=user.id).all()
+        return jsonify({'tasks': [{'id': t.id, 'task': t.task, 'completed': t.completed} for t in tasks]})
+    
+    if request.method == 'POST':
+        task_content = data.get('task', '').strip()
+        if not task_content:
+            return jsonify({'error': 'Nội dung task không được trống'}), 400
+        new_task = Task(id=str(uuid.uuid4()), user_id=user.id, task=task_content, completed=False)
+        db.session.add(new_task)
+        db.session.commit()
+        return jsonify({'message': 'Thêm task thành công'}), 201
+    
+    if request.method == 'DELETE':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({'message': 'Xóa task thành công'}), 200
+    
+    if request.method == 'PUT':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        task.completed = not task.completed
+        db.session.commit()
+        return jsonify({'message': 'Cập nhật task thành công'}), 200
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
+import jwt
+import bcrypt
+from flask import Flask, request, jsonify, session
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.utils import secure_filename
+import os
+import re
+import uuid
+import datetime
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SECRET_KEY'] = 'supersecretkey'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'docx', 'txt'}
+
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+
+class Task(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=str(uuid.uuid4()))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    task = db.Column(db.String(500), nullable=False)
+    completed = db.Column(db.Boolean, default=False)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def generate_token(username):
+    payload = {'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)}
+    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+def validate_username(username):
+    return re.match(r'^[a-zA-Z0-9_]+$', username) is not None
+
+def get_user_from_token(token):
+    try:
+        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return User.query.filter_by(username=decoded['username']).first()
+    except:
+        return None
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    
+    if not username or not password:
+        return jsonify({'error': 'Thiếu username hoặc password'}), 400
+    if not validate_username(username):
+        return jsonify({'error': 'Username chỉ được chứa chữ, số và _'}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Username đã tồn tại'}), 400
+    if len(password) < 6 or not re.search(r"[A-Za-z0-9@#$%^&+=]", password):
+        return jsonify({'error': 'Mật khẩu quá yếu'}), 400
+    
+    hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    new_user = User(username=username, password=hashed_pw)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'Đăng ký thành công'}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    user = User.query.filter_by(username=username).first()
+    
+    if user and bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
+        token = generate_token(username)
+        return jsonify({'message': 'Đăng nhập thành công', 'token': token})
+    return jsonify({'error': 'Sai username hoặc password'}), 401
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Không có file được gửi'}), 400
+    
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Tên file không hợp lệ hoặc định dạng không được phép'}), 400
+    if len(file.filename) > 100:
+        return jsonify({'error': 'Tên file quá dài'}), 400
+    
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    return jsonify({'message': 'Tải lên thành công', 'filename': filename}), 200
+
+@app.route('/todo', methods=['GET', 'POST', 'DELETE', 'PUT'])
+def todo():
+    token = request.headers.get('Authorization')
+    user = get_user_from_token(token)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    if request.method == 'GET':
+        tasks = Task.query.filter_by(user_id=user.id).all()
+        return jsonify({'tasks': [{'id': t.id, 'task': t.task, 'completed': t.completed} for t in tasks]})
+    
+    if request.method == 'POST':
+        task_content = data.get('task', '').strip()
+        if not task_content:
+            return jsonify({'error': 'Nội dung task không được trống'}), 400
+        new_task = Task(id=str(uuid.uuid4()), user_id=user.id, task=task_content, completed=False)
+        db.session.add(new_task)
+        db.session.commit()
+        return jsonify({'message': 'Thêm task thành công'}), 201
+    
+    if request.method == 'DELETE':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({'message': 'Xóa task thành công'}), 200
+    
+    if request.method == 'PUT':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        task.completed = not task.completed
+        db.session.commit()
+        return jsonify({'message': 'Cập nhật task thành công'}), 200
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
+@app.route('/files', methods=['GET'])
+def list_files():
+    """ Trả về danh sách file đã upload """
+    files = os.listdir(app.config['UPLOAD_FOLDER'])
+    return jsonify({'files': files})
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Không có file được gửi'}), 400
+    
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Tên file không hợp lệ hoặc định dạng không được phép'}), 400
+    if len(file.filename) > 100:
+        return jsonify({'error': 'Tên file quá dài'}), 400
+    
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    
+    return jsonify({'message': 'Tải lên thành công', 'filename': filename}), 200
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    """ Xóa session token khi logout """
+    session.pop('user', None)
+    return jsonify({'message': 'Đã đăng xuất'}), 200
+
+@app.route('/todo', methods=['GET', 'POST', 'DELETE', 'PUT'])
+def todo():
+    """ To-Do List lưu vào database thay vì session """
+    token = request.headers.get('Authorization')
+    user = get_user_from_token(token)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    if request.method == 'GET':
+        tasks = Task.query.filter_by(user_id=user.id).all()
+        return jsonify({'tasks': [{'id': t.id, 'task': t.task, 'completed': t.completed} for t in tasks]})
+    
+    if request.method == 'POST':
+        task_content = data.get('task', '').strip()
+        if not task_content:
+            return jsonify({'error': 'Nội dung task không được trống'}), 400
+        new_task = Task(id=str(uuid.uuid4()), user_id=user.id, task=task_content, completed=False)
+        db.session.add(new_task)
+        db.session.commit()
+        return jsonify({'message': 'Thêm task thành công'}), 201
+    
+    if request.method == 'DELETE':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({'message': 'Xóa task thành công'}), 200
+    
+    if request.method == 'PUT':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        task.completed = not task.completed
+        db.session.commit()
+        return jsonify({'message': 'Cập nhật task thành công'}), 200
+import jwt
+import bcrypt
+from flask import Flask, request, jsonify, session
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.utils import secure_filename
+import os
+import re
+import uuid
+import datetime
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SECRET_KEY'] = 'supersecretkey'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB limit
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'docx', 'txt'}
+
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+
+class Task(db.Model):
+    id = db.Column(db.String(36), primary_key=True, default=str(uuid.uuid4()))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    task = db.Column(db.String(500), nullable=False)
+    completed = db.Column(db.Boolean, default=False)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def generate_token(username):
+    payload = {'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1)}
+    return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+
+def get_user_from_token(token):
+    try:
+        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return User.query.filter_by(username=decoded['username']).first()
+    except:
+        return None
+
+@app.route('/files', methods=['GET'])
+def list_files():
+    files = os.listdir(app.config['UPLOAD_FOLDER'])
+    return jsonify({'files': files})
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'Không có file được gửi'}), 400
+    
+    file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': 'Tên file không hợp lệ hoặc định dạng không được phép'}), 400
+    if len(file.filename) > 100:
+        return jsonify({'error': 'Tên file quá dài'}), 400
+    
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    return jsonify({'message': 'Tải lên thành công', 'filename': filename}), 200
+
+@app.route('/todo', methods=['GET', 'POST', 'DELETE', 'PUT'])
+def todo():
+    token = request.headers.get('Authorization')
+    user = get_user_from_token(token)
+    if not user:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    if request.method == 'GET':
+        tasks = Task.query.filter_by(user_id=user.id).all()
+        return jsonify({'tasks': [{'id': t.id, 'task': t.task, 'completed': t.completed} for t in tasks]})
+    
+    if request.method == 'POST':
+        task_content = data.get('task', '').strip()
+        if not task_content:
+            return jsonify({'error': 'Nội dung task không được trống'}), 400
+        new_task = Task(id=str(uuid.uuid4()), user_id=user.id, task=task_content, completed=False)
+        db.session.add(new_task)
+        db.session.commit()
+        return jsonify({'message': 'Thêm task thành công'}), 201
+    
+    if request.method == 'DELETE':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        db.session.delete(task)
+        db.session.commit()
+        return jsonify({'message': 'Xóa task thành công'}), 200
+    
+    if request.method == 'PUT':
+        task_id = data.get('id')
+        task = Task.query.filter_by(id=task_id, user_id=user.id).first()
+        if not task:
+            return jsonify({'error': 'Task không tồn tại'}), 404
+        task.completed = not task.completed
+        db.session.commit()
+        return jsonify({'message': 'Cập nhật task thành công'}), 200
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
