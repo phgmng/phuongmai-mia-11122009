@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Welcome to the Cool Webpage</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap');
+  body {
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 2rem;
+  }
+  h1 {
+    font-size: 3rem;
+    margin: 0 0 0.5rem;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  p {
+    font-size: 1.25rem;
+    margin: 0 0 2rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  button {
+    background: #ff6f61;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 50px;
+    font-size: 1.25rem;
+    color: white;
+    cursor: pointer;
+    box-shadow: 0 8px 15px rgba(255,111,97,0.4);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+  button:hover {
+    background: #ff3b2e;
+    box-shadow: 0 12px 20px rgba(255,59,46,0.6);
+  }
+  footer {
+    margin-top: auto;
+    font-size: 0.9rem;
+    opacity: 0.7;
+  }
+</style>
+</head>
+<body>
+  <h1>Welcome to Your Cool Webpage</h1>
+  <p>Experience modern styling and smooth interaction in one simple page.</p>
+  <button id="actionButton">Click Me!</button>
+  <footer>© 2024 Cool Webpage. All rights reserved.</footer>
+
+  <script>
+    document.getElementById('actionButton').addEventListener('click', () => {
+      alert('Thanks for clicking! Have a great day!');
+    });
+  </script>
+</body>
+</html>
+
